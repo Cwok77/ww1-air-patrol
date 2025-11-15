@@ -53,11 +53,13 @@
       top: 20px;
       left: 24px;
       display: flex;
-      gap: 18px;
+      flex-wrap: wrap;
+      gap: 10px 18px;
       font-weight: 600;
       text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
-      font-size: 14px;
+      font-size: 13px;
       pointer-events: none;
+      max-width: 430px;
     }
 
     .hud span.label {
@@ -95,6 +97,8 @@
       <div><span class="label">Best:</span><span id="best">0</span></div>
       <div><span class="label">Stage:</span><span id="levelName">Fokker Eindecker</span></div>
       <div><span class="label">Lives:</span><span id="lives">❤❤❤</span></div>
+      <div><span class="label">Pilot:</span><span id="currentPilot">-</span></div>
+      <div><span class="label">Top Ace:</span><span id="bestPilot">-</span></div>
     </div>
 
     <div class="hint" id="hint">
@@ -112,6 +116,8 @@
     const hintEl = document.getElementById("hint");
     const levelNameEl = document.getElementById("levelName");
     const livesEl = document.getElementById("lives");
+    const currentPilotEl = document.getElementById("currentPilot");
+    const bestPilotEl = document.getElementById("bestPilot");
 
     const W = canvas.width;
     const H = canvas.height;
@@ -158,6 +164,12 @@
     dr1Img.onload = () => { dr1Loaded = true; };
     dr1Img.onerror = () => console.error("Could not load FokkerDR1.png");
     dr1Img.src = "FokkerDR1.png";
+
+    const dviiImg = new Image();
+    let dviiLoaded = false;
+    dviiImg.onload = () => { dviiLoaded = true; };
+    dviiImg.onerror = () => console.error("Could not load FokkerDVII.png");
+    dviiImg.src = "FokkerDVII.png";
 
     const balloonImg = new Image();
     let balloonLoaded = false;
@@ -237,7 +249,18 @@
     let plane;
     let obstacles;
     let score = 0;
+
+    // High score + best pilot from localStorage
     let bestScore = parseInt(localStorage.getItem("ww1_fokker_best") || "0", 10);
+    let bestPilotName = localStorage.getItem("ww1_fokker_best_pilot") || "-";
+
+    // Current pilot name (for this run)
+    let currentPilotName = "";
+    const lastPilot = localStorage.getItem("ww1_last_pilot");
+    if (lastPilot) {
+      currentPilotName = lastPilot;
+    }
+
     let dr1Unlocked = localStorage.getItem("dr1_unlocked") === "1";
 
     let lives = 3;
@@ -251,11 +274,13 @@
     const parallax = { far: 0, mid: 0, fore: 0 };
 
     // which plane is selected for the game
-    let planeType = "dr3"; // "dr3", "dr1", "diego"
+    let planeType = "dr3"; // "dr3", "dr1", "diego", "dvii"
 
     scoreEl.textContent = score;
     bestEl.textContent = bestScore;
     levelNameEl.textContent = LEVELS[currentLevelIndex].name;
+    bestPilotEl.textContent = bestPilotName;
+    currentPilotEl.textContent = currentPilotName || "-";
 
     function updateLivesDisplay() {
       let hearts = "";
@@ -264,6 +289,21 @@
     }
 
     updateLivesDisplay();
+
+    function ensurePilotName() {
+      if (!currentPilotName) {
+        let name = prompt("Enter pilot name:", "");
+        if (name) {
+          name = name.trim();
+        }
+        if (!name) {
+          name = "Unknown";
+        }
+        currentPilotName = name;
+        currentPilotEl.textContent = currentPilotName;
+        localStorage.setItem("ww1_last_pilot", currentPilotName);
+      }
+    }
 
     function resetGame() {
       plane = {
@@ -405,14 +445,16 @@
       }
 
       // Plane-based speed factor:
-      // DR.3 slightly slower (easier), DR.1 & Diego at normal speed
+      // DR.3 slightly slower (easier), DR.1 & Diego normal, D.VII faster
       let planeSpeedFactor = 1.0;
       if (planeType === "dr3") {
-        planeSpeedFactor = 0.9;   // slightly slower world
+        planeSpeedFactor = 0.9;   // training plane
       } else if (planeType === "dr1") {
-        planeSpeedFactor = 1.0;   // original
+        planeSpeedFactor = 1.0;
       } else if (planeType === "diego") {
-        planeSpeedFactor = 1.0;   // same as DR.1 for now
+        planeSpeedFactor = 1.0;
+      } else if (planeType === "dvii") {
+        planeSpeedFactor = 1.1;   // fastest
       }
 
       levelSpeed *= planeSpeedFactor;
@@ -464,6 +506,7 @@
       let planeFactor = 0.6;
       if (planeType === "dr1") planeFactor = 0.7;
       if (planeType === "diego") planeFactor = 0.55;
+      if (planeType === "dvii") planeFactor = 0.65;
       const planeR = Math.min(plane.width, plane.height) * planeFactor;
 
       for (const o of obstacles) {
@@ -483,8 +526,11 @@
           scoreEl.textContent = score;
           if (score > bestScore) {
             bestScore = score;
+            bestPilotName = currentPilotName || bestPilotName || "Unknown";
             bestEl.textContent = bestScore;
+            bestPilotEl.textContent = bestPilotName;
             localStorage.setItem("ww1_fokker_best", String(bestScore));
+            localStorage.setItem("ww1_fokker_best_pilot", bestPilotName);
           }
           updateLevelByScore();
           checkUnlocks();
@@ -750,6 +796,10 @@
         img = dr1Img;
         loaded = dr1Loaded;
         scale = 0.25;
+      } else if (planeType === "dvii") {
+        img = dviiImg;
+        loaded = dviiLoaded;
+        scale = 0.26;
       } else {
         img = dr3Img;
         loaded = dr3Loaded;
@@ -985,7 +1035,7 @@
       germanPlaneChoices = [];
 
       const startY = H * 0.26;
-      const rowH = 90;
+      const rowH = 82;
       const rowX = 40;
       const rowW = W - 80;
 
@@ -1013,6 +1063,14 @@
           unlocked: true,
           img: diegoImg,
           loaded: diegoLoaded
+        },
+        {
+          tier: "Tier 4",
+          label: "Fokker D.VII",
+          planeType: "dvii",
+          unlocked: true,
+          img: dviiImg,
+          loaded: dviiLoaded
         }
       ];
 
@@ -1021,14 +1079,14 @@
 
         ctx.save();
         ctx.fillStyle = entry.unlocked ? "rgba(255,255,255,0.95)" : "rgba(220,220,220,0.9)";
-        fillRoundedRect(rowX, y, rowW, rowH - 18, 12);
+        fillRoundedRect(rowX, y, rowW, rowH - 14, 12);
 
         ctx.strokeStyle = entry.unlocked ? "rgba(0,0,0,0.25)" : "rgba(0,0,0,0.15)";
         ctx.lineWidth = 1;
-        ctx.strokeRect(rowX + 0.5, y + 0.5, rowW - 1, rowH - 19);
+        ctx.strokeRect(rowX + 0.5, y + 0.5, rowW - 1, rowH - 15);
 
         const thumbX = rowX + 20;
-        const thumbY = y + (rowH - 18) / 2;
+        const thumbY = y + (rowH - 14) / 2;
 
         if (entry.loaded) {
           const maxW = 90;
@@ -1044,11 +1102,11 @@
         ctx.textAlign = "left";
         ctx.fillStyle = "#222";
         ctx.font = "14px " + UI_FONT;
-        ctx.fillText(`${entry.tier} – ${entry.label}`, rowX + 80, y + 30);
+        ctx.fillText(`${entry.tier} – ${entry.label}`, rowX + 80, y + 28);
 
         ctx.fillStyle = entry.unlocked ? "#4caf50" : "#999";
         ctx.font = "13px " + UI_FONT;
-        ctx.fillText(entry.unlocked ? "Ready" : "Locked", rowX + 80, y + 52);
+        ctx.fillText(entry.unlocked ? "Ready" : "Locked", rowX + 80, y + 48);
 
         ctx.restore();
 
@@ -1056,7 +1114,7 @@
           x: rowX,
           y,
           w: rowW,
-          h: rowH - 18,
+          h: rowH - 14,
           planeType: entry.planeType,
           unlocked: entry.unlocked,
           tier: entry.tier
@@ -1179,6 +1237,7 @@
           return;
         } else {
           // keyboard: start German Tier 1 by default
+          ensurePilotName();
           planeType = "dr3";
           screen = "game";
           hintEl.textContent = "Tap or press SPACE to fly ✈️";
@@ -1193,6 +1252,7 @@
       if (screen === "planeSelectGerman") {
         if (!evt) {
           // keyboard default: Tier 1
+          ensurePilotName();
           planeType = "dr3";
           screen = "game";
           hintEl.textContent = "Tap or press SPACE to fly ✈️";
@@ -1216,6 +1276,7 @@
             hintEl.textContent = "Tier 2 locked.\nReach Stage 4 with 40+ points to unlock.";
             return;
           }
+          ensurePilotName();
           planeType = clickedRow.planeType;
           screen = "game";
           hintEl.textContent = "Tap or press SPACE to fly ✈️";
