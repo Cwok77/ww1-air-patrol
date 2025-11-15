@@ -82,6 +82,7 @@
       text-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
       text-align: center;
       pointer-events: none;
+      white-space: pre-line;
     }
   </style>
 </head>
@@ -97,7 +98,7 @@
     </div>
 
     <div class="hint" id="hint">
-      Tap a plane to start<br />Sky Forge presents
+      Tap a side to enter
     </div>
   </div>
 
@@ -117,6 +118,18 @@
     const GROUND_HEIGHT = 90;
 
     const UI_FONT = "Segoe UI, Tahoma, Geneva, Verdana, sans-serif";
+
+    // --- Game state / screens ---
+    // "splash" → choose side (German / British)
+    // "planeSelectGerman" → list of tiers
+    // "planeSelectBritish" → under construction screen
+    // "game" → actual flying
+    let screen = "splash";
+
+    // clickable areas
+    let germanEntryRect = null;
+    let britishEntryRect = null;
+    let germanPlaneChoices = []; // rows for Tier 1/2/3
 
     function fillRoundedRect(x, y, w, h, r) {
       ctx.beginPath();
@@ -164,12 +177,14 @@
     diegoImg.onerror = () => console.error("Could not load DiegoPilot.png");
     diegoImg.src = "DiegoPilot.png";
 
+    // Splash logo
     const splashLogo = new Image();
     let splashLogoLoaded = false;
     splashLogo.onload = () => { splashLogoLoaded = true; drawSplash(); };
     splashLogo.onerror = () => console.error("Could not load Logo.png");
     splashLogo.src = "Logo.png";
 
+    // Levels (WW1 themed)
     const LEVELS = [
       {
         name: "Fokker Eindecker",
@@ -235,12 +250,8 @@
 
     const parallax = { far: 0, mid: 0, fore: 0 };
 
-    let splash = true;
-    let planeType = "dr3";
-
-    let dr3ChoiceRect = null;
-    let dr1ChoiceRect = null;
-    let diegoChoiceRect = null;
+    // which plane is selected for the game
+    let planeType = "dr3"; // "dr3", "dr1", "diego"
 
     scoreEl.textContent = score;
     bestEl.textContent = bestScore;
@@ -283,7 +294,6 @@
     function startGameLoop() {
       if (!gameRunning && !gameOver) {
         gameRunning = true;
-        hintEl.textContent = "";
         requestAnimationFrame(loop);
       }
     }
@@ -310,7 +320,7 @@
       if (!dr1Unlocked && currentLevelIndex === 3 && score >= 40) {
         dr1Unlocked = true;
         localStorage.setItem("dr1_unlocked", "1");
-        hintEl.textContent = "Fokker DR.1 unlocked! Tap a plane to use it next run.";
+        hintEl.textContent = "Fokker DR.1 unlocked! Use German → Tier 2 to select it.";
       }
     }
 
@@ -432,6 +442,7 @@
       }
     }
 
+    // --- Background & parallax ---
     function drawBackground() {
       const level = LEVELS[currentLevelIndex];
 
@@ -561,6 +572,7 @@
       ctx.fill();
     }
 
+    // --- Star + flak cloud ---
     function drawStar6(cx, cy, outerR, innerR, color, alpha) {
       ctx.save();
       ctx.globalAlpha = alpha;
@@ -658,6 +670,7 @@
       }
     }
 
+    // --- Smoke for engine damage ---
     function drawSmokePuff(cx, cy, baseR, alpha, shade) {
       ctx.save();
       ctx.globalAlpha = alpha;
@@ -673,10 +686,6 @@
     }
 
     function drawPlane() {
-      drawPlaneSprite();
-    }
-
-    function drawPlaneSprite() {
       const { x, y, width, height } = plane;
       const cx = x + width * 0.5;
       const cy = y + height * 0.5;
@@ -774,13 +783,12 @@
       }
     }
 
-    // Stronger fog overlay, on top of plane & obstacles
+    // --- Fog overlay (on top, including plane) ---
     function drawFogOverlay() {
       if (score < 100) return;
 
-      // Start already quite visible, scale up a bit with score
       const extra = Math.min((score - 100) * 0.003, 0.25);
-      const alphaBottom = 0.30 + extra;   // was ~0.16
+      const alphaBottom = 0.30 + extra;
       const alphaTop = alphaBottom * 0.8;
 
       ctx.save();
@@ -800,7 +808,6 @@
       }
       drawPlane();
 
-      // Fog is drawn LAST over the entire scene (plane included)
       drawFogOverlay();
 
       if (gameOver) {
@@ -815,12 +822,13 @@
 
         ctx.font = "17px " + UI_FONT;
         ctx.fillText(`Score: ${score}  •  Best: ${bestScore}`, W / 2, H / 2 + 6);
-        ctx.fillText("Tap or press SPACE to return to hangar", W / 2, H / 2 + 34);
+        ctx.fillText("Tap or press SPACE to return to menu", W / 2, H / 2 + 34);
       }
     }
 
+    // --- Splash screen: title, logo, German cross & British roundel ---
     function drawSplash() {
-      if (!splash) return;
+      if (screen !== "splash") return;
 
       ctx.clearRect(0, 0, W, H);
       ctx.fillStyle = "#ffffff";
@@ -828,111 +836,240 @@
 
       ctx.textAlign = "center";
 
+      // Game title
       ctx.fillStyle = "#1e3a5f";
-      ctx.font = "20px " + UI_FONT;
-      ctx.fillText("Sky Forge presents", W / 2, H * 0.12);
+      ctx.font = "26px " + UI_FONT;
+      ctx.fillText("WW1 Air Patrol", W / 2, H * 0.15);
 
+      // "powered by" + logo
       ctx.fillStyle = "#555";
-      ctx.font = "18px " + UI_FONT;
-      ctx.fillText("WW1 Air Patrol", W / 2, H * 0.12 + 26);
+      ctx.font = "16px " + UI_FONT;
+      ctx.fillText("powered by", W / 2, H * 0.20);
 
       if (splashLogoLoaded) {
-        const targetWidth = 260;
+        const targetWidth = 160;
         const scale = Math.min(targetWidth / splashLogo.width, 1);
         const imgW = splashLogo.width * scale;
         const imgH = splashLogo.height * scale;
         const x = (W - imgW) / 2;
-        const y = H * 0.20;
+        const y = H * 0.22;
         ctx.drawImage(splashLogo, x, y, imgW, imgH);
       }
 
+      // Instruction
       ctx.fillStyle = "#333";
       ctx.font = "18px " + UI_FONT;
-      ctx.fillText("Choose your aircraft", W / 2, H * 0.52);
+      ctx.fillText("Choose your side", W / 2, H * 0.45);
 
-      const planeAreaY = H * 0.55;
-      const areaHeight = 170;
-      const centerLeftX = W * 0.2;
-      const centerMidX  = W * 0.5;
-      const centerRightX= W * 0.8;
+      const iconSize = 90;
+      const iconY = H * 0.60;
+      const germanX = W * 0.28;
+      const britishX = W * 0.72;
 
-      if (dr3Loaded) {
-        const maxW = 190;
-        const sc = Math.min(maxW / dr3Img.width, 0.5);
-        const imgW = dr3Img.width * sc;
-        const imgH = dr3Img.height * sc;
-        const x = centerLeftX - imgW / 2;
-        const y = planeAreaY + (areaHeight - imgH) / 2;
-        ctx.drawImage(dr3Img, x, y, imgW, imgH);
-        dr3ChoiceRect = { x, y, w: imgW, h: imgH };
-      } else {
-        ctx.fillStyle = "#ddd";
-        ctx.fillRect(centerLeftX - 60, planeAreaY + 40, 120, 60);
-        dr3ChoiceRect = { x: centerLeftX - 60, y: planeAreaY + 40, w: 120, h: 60 };
-      }
+      // German cross (Balkenkreuz-ish)
+      germanEntryRect = {
+        x: germanX - iconSize / 2,
+        y: iconY - iconSize / 2,
+        w: iconSize,
+        h: iconSize
+      };
+      ctx.save();
+      ctx.translate(germanX, iconY);
+      const s = iconSize / 2;
+      ctx.fillStyle = "#000";
+      // black base cross
+      ctx.fillRect(-s * 0.2, -s, s * 0.4, s * 2);
+      ctx.fillRect(-s, -s * 0.2, s * 2, s * 0.4);
+      ctx.fillStyle = "#fff";
+      // inner white cross
+      ctx.fillRect(-s * 0.12, -s * 0.75, s * 0.24, s * 1.5);
+      ctx.fillRect(-s * 0.75, -s * 0.12, s * 1.5, s * 0.24);
+      ctx.restore();
 
+      // British roundel
+      britishEntryRect = {
+        x: britishX - iconSize / 2,
+        y: iconY - iconSize / 2,
+        w: iconSize,
+        h: iconSize
+      };
+      ctx.save();
+      ctx.translate(britishX, iconY);
+      const r = iconSize * 0.45;
+      // outer blue
+      ctx.beginPath();
+      ctx.fillStyle = "#165ba5";
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      // middle white
+      ctx.beginPath();
+      ctx.fillStyle = "#ffffff";
+      ctx.arc(0, 0, r * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+      // inner red
+      ctx.beginPath();
+      ctx.fillStyle = "#c7232c";
+      ctx.arc(0, 0, r * 0.38, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Labels
       ctx.fillStyle = "#222";
-      ctx.font = "16px " + UI_FONT;
-      ctx.fillText("Fokker DR.3", centerLeftX, planeAreaY + areaHeight + 10);
+      ctx.font = "15px " + UI_FONT;
+      ctx.fillText("German Air Service", germanX, iconY + iconSize * 0.75);
+      ctx.fillText("Royal Flying Corps", britishX, iconY + iconSize * 0.75);
+    }
 
-      if (dr1Loaded) {
-        const maxW = 160;
-        const sc = Math.min(maxW / dr1Img.width, 0.3);
-        const imgW = dr1Img.width * sc;
-        const imgH = dr1Img.height * sc;
-        const x = centerMidX - imgW / 2;
-        const y = planeAreaY + (areaHeight - imgH) / 2;
+    // --- German plane selection screen (T1/T2/T3) ---
+    function drawGermanPlaneList() {
+      if (screen !== "planeSelectGerman") return;
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#f5f5f5";
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#1e3a5f";
+      ctx.font = "22px " + UI_FONT;
+      ctx.fillText("German Air Service", W / 2, H * 0.12);
+
+      ctx.fillStyle = "#555";
+      ctx.font = "16px " + UI_FONT;
+      ctx.fillText("Select your aircraft", W / 2, H * 0.18);
+
+      hintEl.textContent = "Tap a tier to choose your aircraft";
+
+      germanPlaneChoices = [];
+
+      const startY = H * 0.26;
+      const rowH = 90;
+      const rowX = 40;
+      const rowW = W - 80;
+
+      const entries = [
+        {
+          tier: "Tier 1",
+          label: "Fokker DR.3",
+          planeType: "dr3",
+          unlocked: true,
+          img: dr3Img,
+          loaded: dr3Loaded
+        },
+        {
+          tier: "Tier 2",
+          label: "Fokker DR.1",
+          planeType: "dr1",
+          unlocked: dr1Unlocked,
+          img: dr1Img,
+          loaded: dr1Loaded
+        },
+        {
+          tier: "Tier 3",
+          label: "DiegoPilot",
+          planeType: "diego",
+          unlocked: true,
+          img: diegoImg,
+          loaded: diegoLoaded
+        }
+      ];
+
+      entries.forEach((entry, i) => {
+        const y = startY + i * rowH;
+
         ctx.save();
-        if (!dr1Unlocked) ctx.globalAlpha = 0.35;
-        ctx.drawImage(dr1Img, x, y, imgW, imgH);
+        ctx.fillStyle = entry.unlocked ? "rgba(255,255,255,0.95)" : "rgba(220,220,220,0.9)";
+        fillRoundedRect(rowX, y, rowW, rowH - 18, 12);
+
+        ctx.strokeStyle = entry.unlocked ? "rgba(0,0,0,0.25)" : "rgba(0,0,0,0.15)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rowX + 0.5, y + 0.5, rowW - 1, rowH - 19);
+
+        const thumbX = rowX + 20;
+        const thumbY = y + (rowH - 18) / 2;
+
+        if (entry.loaded) {
+          const maxW = 90;
+          const scale = Math.min(maxW / entry.img.width, 0.5);
+          const imgW = entry.img.width * scale;
+          const imgH = entry.img.height * scale;
+          ctx.drawImage(entry.img, thumbX - imgW / 2, thumbY - imgH / 2, imgW, imgH);
+        } else {
+          ctx.fillStyle = "#ccc";
+          ctx.fillRect(thumbX - 30, thumbY - 15, 60, 30);
+        }
+
+        ctx.textAlign = "left";
+        ctx.fillStyle = "#222";
+        ctx.font = "14px " + UI_FONT;
+        ctx.fillText(`${entry.tier} – ${entry.label}`, rowX + 80, y + 30);
+
+        ctx.fillStyle = entry.unlocked ? "#4caf50" : "#999";
+        ctx.font = "13px " + UI_FONT;
+        ctx.fillText(entry.unlocked ? "Ready" : "Locked", rowX + 80, y + 52);
+
         ctx.restore();
-        dr1ChoiceRect = { x, y, w: imgW, h: imgH };
-      } else {
-        ctx.fillStyle = "#ddd";
-        ctx.fillRect(centerMidX - 60, planeAreaY + 40, 120, 60);
-        dr1ChoiceRect = { x: centerMidX - 60, y: planeAreaY + 40, w: 120, h: 60 };
-      }
 
-      ctx.fillStyle = "#222";
-      ctx.font = "16px " + UI_FONT;
-      ctx.fillText("Fokker DR.1", centerMidX, planeAreaY + areaHeight + 10);
+        germanPlaneChoices.push({
+          x: rowX,
+          y,
+          w: rowW,
+          h: rowH - 18,
+          planeType: entry.planeType,
+          unlocked: entry.unlocked,
+          tier: entry.tier
+        });
+      });
 
-      ctx.font = "12px " + UI_FONT;
-      if (dr1Unlocked) {
-        ctx.fillStyle = "#ffd54f";
-        ctx.fillText("Tier 2 (unlocked)", centerMidX, planeAreaY + areaHeight - 18);
-      } else {
-        ctx.fillStyle = "#999";
-        ctx.fillText("Reach Stage 4, 40+ pts", centerMidX, planeAreaY + areaHeight - 18);
-      }
+      // Small hint at bottom
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#777";
+      ctx.font = "13px " + UI_FONT;
+      ctx.fillText("Tap anywhere outside rows to go back", W / 2, H - 30);
+    }
 
-      if (diegoLoaded) {
-        const maxW2 = 170;
-        const sc2 = Math.min(maxW2 / diegoImg.width, 0.5);
-        const imgW2 = diegoImg.width * sc2;
-        const imgH2 = diegoImg.height * sc2;
-        const x2 = centerRightX - imgW2 / 2;
-        const y2 = planeAreaY + (areaHeight - imgH2) / 2;
-        ctx.drawImage(diegoImg, x2, y2, imgW2, imgH2);
-        diegoChoiceRect = { x: x2, y: y2, w: imgW2, h: imgH2 };
-      } else {
-        ctx.fillStyle = "#ddd";
-        ctx.fillRect(centerRightX - 60, planeAreaY + 40, 120, 60);
-        diegoChoiceRect = {
-          x: centerRightX - 60,
-          y: planeAreaY + 40,
-          w: 120,
-          h: 60
-        };
-      }
+    // --- British side: under construction screen ---
+    function drawBritishWIP() {
+      if (screen !== "planeSelectBritish") return;
 
-      ctx.fillStyle = "#222";
-      ctx.font = "16px " + UI_FONT;
-      ctx.fillText("DiegoPilot", centerRightX, planeAreaY + areaHeight + 10);
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#f5f5f5";
+      ctx.fillRect(0, 0, W, H);
 
-      ctx.fillStyle = "#666";
+      ctx.textAlign = "center";
+
+      ctx.fillStyle = "#1e3a5f";
+      ctx.font = "22px " + UI_FONT;
+      ctx.fillText("Royal Flying Corps", W / 2, H * 0.16);
+
+      // Big roundel
+      const centerX = W / 2;
+      const centerY = H * 0.40;
+      const r = 90;
+
+      ctx.beginPath();
+      ctx.fillStyle = "#165ba5";
+      ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.fillStyle = "#ffffff";
+      ctx.arc(centerX, centerY, r * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.fillStyle = "#c7232c";
+      ctx.arc(centerX, centerY, r * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#555";
+      ctx.font = "18px " + UI_FONT;
+      ctx.fillText("Under construction", W / 2, H * 0.62);
+
+      ctx.fillStyle = "#777";
       ctx.font = "14px " + UI_FONT;
-      ctx.fillText("Tap a plane (or SPACE for DR.3)", W / 2, H - 26);
+      ctx.fillText("Tap to return to side selection", W / 2, H * 0.68);
+
+      hintEl.textContent = "British side\nUnder construction – tap to go back";
     }
 
     function endGame() {
@@ -957,9 +1094,8 @@
       if (gameRunning) requestAnimationFrame(loop);
     }
 
-    function choosePlaneFromEvent(evt) {
-      if (!evt) return false;
-
+    // --- Input helpers ---
+    function getCanvasCoordinates(evt) {
       const rect = canvas.getBoundingClientRect();
       let clientX, clientY;
 
@@ -976,57 +1112,109 @@
 
       const x = ((clientX - rect.left) / rect.width) * W;
       const y = ((clientY - rect.top) / rect.height) * H;
-
-      function inside(r) {
-        return r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
-      }
-
-      if (inside(dr3ChoiceRect)) {
-        planeType = "dr3";
-        return true;
-      }
-      if (inside(dr1ChoiceRect)) {
-        if (!dr1Unlocked) {
-          hintEl.textContent = "Reach Stage 4 with 40+ points to unlock DR.1";
-          return false;
-        }
-        planeType = "dr1";
-        return true;
-      }
-      if (inside(diegoChoiceRect)) {
-        planeType = "diego";
-        return true;
-      }
-      return false;
+      return { x, y };
     }
 
     function handleInput(evt) {
-      if (splash) {
-        if (evt && (evt.type === "mousedown" || evt.type === "touchstart")) {
-          const chosen = choosePlaneFromEvent(evt);
-          if (!chosen) return;
-        } else if (!evt) {
-          planeType = "dr3";
-        }
+      // --- MAIN MENU: side selection ---
+      if (screen === "splash") {
+        if (evt) {
+          const { x, y } = getCanvasCoordinates(evt);
 
-        splash = false;
-        hintEl.textContent = "Tap or press SPACE to fly ✈️";
-        resetGame();
-        flap();
-        startGameLoop();
-        return;
+          function inside(r) {
+            return r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+          }
+
+          if (inside(germanEntryRect)) {
+            screen = "planeSelectGerman";
+            drawGermanPlaneList();
+            return;
+          }
+          if (inside(britishEntryRect)) {
+            screen = "planeSelectBritish";
+            drawBritishWIP();
+            return;
+          }
+          // click elsewhere: do nothing
+          return;
+        } else {
+          // keyboard: just start German Tier 1 as default
+          planeType = "dr3";
+          screen = "game";
+          hintEl.textContent = "Tap or press SPACE to fly ✈️";
+          resetGame();
+          flap();
+          startGameLoop();
+          return;
+        }
       }
 
-      if (gameOver) {
-        gameOver = false;
-        splash = true;
-        hintEl.textContent = "Tap a plane to start\nSky Forge presents";
+      // --- GERMAN PLANE SELECT ---
+      if (screen === "planeSelectGerman") {
+        if (!evt) {
+          // keyboard: default Tier 1
+          planeType = "dr3";
+          screen = "game";
+          hintEl.textContent = "Tap or press SPACE to fly ✈️";
+          resetGame();
+          flap();
+          startGameLoop();
+          return;
+        }
+
+        const { x, y } = getCanvasCoordinates(evt);
+        let clickedRow = null;
+        for (const row of germanPlaneChoices) {
+          if (x >= row.x && x <= row.x + row.w && y >= row.y && y <= row.y + row.h) {
+            clickedRow = row;
+            break;
+          }
+        }
+
+        if (clickedRow) {
+          if (!clickedRow.unlocked) {
+            hintEl.textContent = "Tier 2 locked.\nReach Stage 4 with 40+ points to unlock.";
+            return;
+          }
+          planeType = clickedRow.planeType;
+          screen = "game";
+          hintEl.textContent = "Tap or press SPACE to fly ✈️";
+          resetGame();
+          flap();
+          startGameLoop();
+          return;
+        } else {
+          // tapped outside rows → back to splash
+          screen = "splash";
+          hintEl.textContent = "Tap a side to enter";
+          drawSplash();
+          return;
+        }
+      }
+
+      // --- BRITISH: UNDER CONSTRUCTION ---
+      if (screen === "planeSelectBritish") {
+        // any input -> back to splash
+        screen = "splash";
+        hintEl.textContent = "Tap a side to enter";
         drawSplash();
         return;
       }
 
-      flap();
-      startGameLoop();
+      // --- GAME OVER: return to menu ---
+      if (gameOver) {
+        gameOver = false;
+        screen = "splash";
+        hintEl.textContent = "Tap a side to enter";
+        drawSplash();
+        return;
+      }
+
+      // --- IN-GAME: flap/start ---
+      if (screen === "game") {
+        flap();
+        startGameLoop();
+      }
     }
 
     window.addEventListener("keydown", (e) => {
@@ -1046,6 +1234,7 @@
       handleInput(e);
     }, { passive: false });
 
+    // --- Initial state ---
     resetGame();
     drawSplash();
   </script>
