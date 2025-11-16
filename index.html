@@ -317,7 +317,92 @@ async function initLeaderboard() {
     drawSplash();
   }
 }
+// === Online leaderboard backend (Google Apps Script) ===
+// Use the googleusercontent URL that returns {"top":[...]}
+const API_URL = "https://script.googleusercontent.com/a/macros/flyboys.games/echo?user_content_key=AehSKLh-vfpm-b8LOVjEggy3lntDOFugimlaLS8ASBCibZwB2n7d1tsiDlRwjHEZyPSKrr-CPs3x3wMBX1jfpYgNIA2Jgfl6XycDXd1o4K21suGqQnBURbJRhA9ceAZ0uSUm9q3Px2yBfSnZ9wCEvtAkhGcs6z2i7p9lijbjoEsvAST9WKoHHr0npnb4-PD4Vq_XUhq-U7HWGNtDvRX01WAqhn1oYsK2ZhpAViC3fH9h9MoZLNASgn08DtKPNkUaLfhvZXFSqmIG-YM9jqovpftdQjgi-GufvQ_RkROhmywfidXdv5QFx1WhtPzAxpVN9Q&lib=MfwG337EoII1Bmsh7K-BOZuNCPjHlJrgC";
 
+// High score & leaderboard (local + global)
+let bestScore = parseInt(localStorage.getItem("ww1_fokker_best") || "0", 10);
+let bestPilotName = localStorage.getItem("ww1_fokker_best_pilot") || "-";
+
+let leaderboard = [];
+
+// Save local cache of leaderboard for offline
+function saveLeaderboard() {
+  try {
+    localStorage.setItem("ww1_leaderboard", JSON.stringify(leaderboard));
+  } catch (e) {
+    console.log("Cannot save leaderboard locally:", e);
+  }
+}
+
+// Fire-and-forget online submit (avoids CORS preflight)
+function sendScoreOnline(name, newScore) {
+  try {
+    fetch(API_URL, {
+      method: "POST",
+      mode: "no-cors",                         // <- important
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8"  // <- "simple" request, no preflight
+      },
+      body: JSON.stringify({ name, score: newScore })
+    });
+  } catch (err) {
+    console.log("[WW1] Online score send failed (ignored):", err);
+  }
+}
+
+// Load leaderboard (local cache first, then server)
+async function initLeaderboard() {
+  // 1) Local cache so splash screen has something immediately
+  const raw = localStorage.getItem("ww1_leaderboard");
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        leaderboard = parsed;
+      }
+    } catch (e) {
+      leaderboard = [];
+    }
+  }
+
+  // 2) Try online server (Google Apps Script)
+  try {
+    const res = await fetch(API_URL);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.top)) {
+        // Normalize rows coming from Apps Script
+        leaderboard = data.top.map(row => ({
+          name: row.name,
+          score: Number(row.score) || 0
+        }));
+        leaderboard.sort((a, b) => b.score - a.score);
+        saveLeaderboard(); // cache for offline
+      }
+    }
+  } catch (err) {
+    console.log("Online leaderboard not available, using local only.", err);
+  }
+
+  // 3) Update bestScore / bestPilotName from leaderboard
+  if (leaderboard.length > 0) {
+    bestScore = leaderboard[0].score;
+    bestPilotName = leaderboard[0].name || "-";
+  }
+
+  bestEl.textContent = bestScore;
+  bestPilotEl.textContent = bestPilotName;
+
+  // If we are on splash, redraw to show Top Aces
+  if (screen === "splash") {
+    drawSplash();
+  }
+}
+
+// call once on load
+initLeaderboard();
 // call once on load
 initLeaderboard();
 
