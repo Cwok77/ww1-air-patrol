@@ -128,8 +128,12 @@
 
     const UI_FONT = "Segoe UI, Tahoma, Geneva, Verdana, sans-serif";
 
-    // === Online leaderboard backend (Google Apps Script) ===
-   const API_URL = "https://script.google.com/macros/s/AKfycbx2LX4H44GGE-wUsTZeR-ldi9p6xyk_AX4MaH2gbOLIZZGHtJlj7ncejmA85VrPqkqg1Q/exec";
+   // === Online leaderboard backend (Google Apps Script) ===
+// READ: use the googleusercontent echo URL (shows {"top":[...]})
+const API_READ_URL = "https://script.googleusercontent.com/a/macros/flyboys.games/echo?user_content_key=AehSKLh-vfpm-b8LOVjEggy3lntDOFugimlaLS8ASBCibZwB2n7d1tsiDlRwjHEZyPSKrr-CPs3x3wMBX1jfpYgNIA2Jgfl6XycDXd1o4K21suGqQnBURbJRhA9ceAZ0uSUm9q3Px2yBfSnZ9wCEvtAkhGcs6z2i7p9lijbjoEsvAST9WKoHHr0npnb4-PD4Vq_XUhq-U7HWGNtDvRX01WAqhn1oYsK2ZhpAViC3fH9h9MoZLNASgn08DtKPNkUaLfhvZXFSqmIG-YM9jqovpftdQjgi-GufvQ_RkROhmywfidXdv5QFx1WhtPzAxpVN9Q&lib=MfwG337EoII1Bmsh7K-BOZuNCPjHlJrgC";
+
+// WRITE: use the /exec Web App URL (doPost -> appendRow)
+const API_WRITE_URL = "https://script.google.com/macros/s/AKfycbx2LX4H44GGE-wUsTZeR-ldi9p6xyk_AX4MaH2gbOLIZZGHtJlj7ncejmA85VrPqkqg1Q/exec";
 
     // Screens: splash, planeSelectGerman, planeSelectBritish, game
     let screen = "splash";
@@ -268,19 +272,54 @@
     }
 
     // Try to load leaderboard from server; fall back to localStorage if it fails
-    async function initLeaderboard() {
-      // 1) Start from local cache so splash can show something immediately
-      const raw = localStorage.getItem("ww1_leaderboard");
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            leaderboard = parsed;
-          }
-        } catch (e) {
-          leaderboard = [];
-        }
+async function initLeaderboard() {
+  // 1) Start from local cache so splash can show something immediately
+  const raw = localStorage.getItem("ww1_leaderboard");
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        leaderboard = parsed;
       }
+    } catch (e) {
+      leaderboard = [];
+    }
+  }
+
+  // 2) Try online server (Google Apps Script) for global top
+  try {
+    const res = await fetch(API_READ_URL);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.top)) {
+        leaderboard = data.top;
+        saveLeaderboard(); // cache for offline
+      }
+    }
+  } catch (err) {
+    console.log("Online leaderboard not available, using local only.", err);
+  }
+
+  // 3) Update bestScore / bestPilotName from leaderboard
+  if (leaderboard.length > 0) {
+    const top = leaderboard[0];
+    if (typeof top.score === "number") {
+      bestScore = top.score;
+      bestPilotName = top.name || "-";
+    }
+  }
+
+  bestEl.textContent = bestScore;
+  bestPilotEl.textContent = bestPilotName;
+
+  // If we are on splash, redraw to show updated Top Aces
+  if (screen === "splash") {
+    drawSplash();
+  }
+}
+
+// call once on load
+initLeaderboard();
 
       // 2) Try online server (Google Apps Script)
       try {
@@ -366,26 +405,52 @@
       }
     }
 
-    async function updateLeaderboardForCurrentPilot() {
-      if (!currentPilotName) return;
+    function updateLeaderboardForCurrentPilot() {
+  if (!currentPilotName) return;
 
-      const name = currentPilotName;
-      const newScore = score;
+  const name = currentPilotName;
+  const newScore = score;
 
-      // 1) Update local leaderboard (as before)
-      let entry = leaderboard.find(e => e.name === name);
-      if (entry) {
-        if (newScore > entry.score) {
-          entry.score = newScore;
-        }
-      } else {
-        leaderboard.push({ name, score: newScore });
-      }
+  // 1) Update local leaderboard (as before)
+  let entry = leaderboard.find(e => e.name === name);
+  if (entry) {
+    if (newScore > entry.score) {
+      entry.score = newScore;
+    }
+  } else {
+    leaderboard.push({ name, score: newScore });
+  }
 
-      leaderboard.sort((a, b) => b.score - a.score);
-      if (leaderboard.length > 10) {
-        leaderboard.length = 10;
-      }
+  leaderboard.sort((a, b) => b.score - a.score);
+  if (leaderboard.length > 10) {
+    leaderboard.length = 10;
+  }
+
+  saveLeaderboard();
+
+  if (leaderboard.length > 0) {
+    bestScore = leaderboard[0].score;
+    bestPilotName = leaderboard[0].name || "-";
+    bestEl.textContent = bestScore;
+    bestPilotEl.textContent = bestPilotName;
+    localStorage.setItem("ww1_fokker_best", String(bestScore));
+    localStorage.setItem("ww1_fokker_best_pilot", bestPilotName);
+  }
+
+  // 2) Send the new score to the online API (fire & forget, no-cors to avoid Chrome CORS preflight)
+  try {
+    fetch(API_WRITE_URL, {
+      method: "POST",
+      mode: "no-cors", // <— important: no preflight, no CORS error
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8"
+      },
+      body: JSON.stringify({ name, score: newScore })
+    });
+  } catch (err) {
+    console.log("Cannot submit score online (ignored):", err);
+  }
+}
 
       saveLeaderboard();
 
