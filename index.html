@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>WW1 Sky Patrol</title>
+  <title>WW1 Air Patrol</title>
 
   <!-- iPhone full-screen web app settings -->
   <meta name="viewport"
@@ -60,14 +60,14 @@
       font-size: 13px;
       pointer-events: none;
       max-width: 430px;
-      color: #ffeb3b; /* bright yellow text */
+      color: #ffeb3b;
     }
 
     .hud span.label {
       opacity: 0.9;
       font-weight: 400;
       margin-right: 4px;
-      color: #ffe082; /* softer yellow for labels */
+      color: #ffe082;
     }
 
     #lives {
@@ -87,7 +87,7 @@
       text-align: center;
       pointer-events: none;
       white-space: pre-line;
-      color: #ffeb3b; /* better visibility */
+      color: #ffeb3b;
     }
   </style>
 </head>
@@ -122,14 +122,13 @@
     const currentPilotEl = document.getElementById("currentPilot");
     const bestPilotEl = document.getElementById("bestPilot");
 
+    // === Your Apps Script endpoint for global scores ===
+    const API_URL = "https://script.google.com/macros/s/AKfycbx2LX4H44GGE-wUsTZeR-ldi9p6xyk_AX4MaH2gbOLIZZGHtJlj7ncejmA85VrPqkqg1Q/exec";
+
     const W = canvas.width;
     const H = canvas.height;
     const GROUND_HEIGHT = 90;
-
     const UI_FONT = "Segoe UI, Tahoma, Geneva, Verdana, sans-serif";
-
-    // === Online leaderboard backend (Google Apps Script) ===
-   const API_URL = "https://script.google.com/macros/s/AKfycbx2LX4H44GGE-wUsTZeR-ldi9p6xyk_AX4MaH2gbOLIZZGHtJlj7ncejmA85VrPqkqg1Q/exec";
 
     // Screens: splash, planeSelectGerman, planeSelectBritish, game
     let screen = "splash";
@@ -160,7 +159,6 @@
     dr3Img.onerror = () => console.error("Could not load FokkerDR3.png");
     dr3Img.src = "FokkerDR3.png";
 
-    // NEW: Thumbnail for DR3
     const dr3ThumbImg = new Image();
     let dr3ThumbLoaded = false;
     dr3ThumbImg.onload = () => { dr3ThumbLoaded = true; };
@@ -256,20 +254,17 @@
     let obstacles;
     let score = 0;
 
-    // High score & leaderboard
+    // === Local high score & leaderboard (per device) ===
     let bestScore = parseInt(localStorage.getItem("ww1_fokker_best") || "0", 10);
     let bestPilotName = localStorage.getItem("ww1_fokker_best_pilot") || "-";
 
     let leaderboard = [];
 
-    // Local fallback save (for offline / caching)
     function saveLeaderboard() {
       localStorage.setItem("ww1_leaderboard", JSON.stringify(leaderboard));
     }
 
-    // Try to load leaderboard from server; fall back to localStorage if it fails
-    async function initLeaderboard() {
-      // 1) Start from local cache so splash can show something immediately
+    (function initLeaderboard() {
       const raw = localStorage.getItem("ww1_leaderboard");
       if (raw) {
         try {
@@ -281,41 +276,17 @@
           leaderboard = [];
         }
       }
-
-      // 2) Try online server (Google Apps Script)
-      try {
-        const res = await fetch(API_URL);
-        if (res.ok) {
-          const data = await res.json();
-          if (data && Array.isArray(data.top)) {
-            leaderboard = data.top;
-            saveLeaderboard(); // cache for offline
-          }
-        }
-      } catch (err) {
-        console.log("Online leaderboard not available, using local only.", err);
-      }
-
-      // 3) Update bestScore / bestPilotName from leaderboard
       if (leaderboard.length > 0) {
-        const top = leaderboard[0];
-        if (typeof top.score === "number") {
-          bestScore = top.score;
-          bestPilotName = top.name || "-";
+        bestScore = leaderboard[0].score;
+        bestPilotName = leaderboard[0].name || "-";
+      } else {
+        if (bestScore > 0 && bestPilotName && bestPilotName !== "-") {
+          leaderboard.push({ name: bestPilotName, score: bestScore });
+          leaderboard.sort((a, b) => b.score - a.score);
+          saveLeaderboard();
         }
       }
-
-      bestEl.textContent = bestScore;
-      bestPilotEl.textContent = bestPilotName;
-
-      // If we are on splash, redraw to show updated Top Aces
-      if (screen === "splash") {
-        drawSplash();
-      }
-    }
-
-    // call once on load
-    initLeaderboard();
+    })();
 
     let currentPilotName = "";
     const lastPilot = localStorage.getItem("ww1_last_pilot");
@@ -366,13 +337,28 @@
       }
     }
 
-    async function updateLeaderboardForCurrentPilot() {
+    // === Fire-and-forget online score send (no-cors to avoid CORS) ===
+    function sendScoreOnline(name, newScore) {
+      try {
+        fetch(API_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8"
+          },
+          body: JSON.stringify({ name, score: newScore })
+        });
+      } catch (err) {
+        console.log("[WW1] Online score send failed (ignored):", err);
+      }
+    }
+
+    function updateLeaderboardForCurrentPilot() {
       if (!currentPilotName) return;
 
       const name = currentPilotName;
       const newScore = score;
 
-      // 1) Update local leaderboard (as before)
       let entry = leaderboard.find(e => e.name === name);
       if (entry) {
         if (newScore > entry.score) {
@@ -398,18 +384,8 @@
         localStorage.setItem("ww1_fokker_best_pilot", bestPilotName);
       }
 
-      // 2) Send the new score to the online API (fire & forget)
-      try {
-        await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, score: newScore })
-        });
-        // Optionally refresh from server so splash shows global Top Aces
-        initLeaderboard();
-      } catch (err) {
-        console.log("Cannot submit score online:", err);
-      }
+      // Send to global leaderboard (Google Sheet)
+      sendScoreOnline(name, newScore);
     }
 
     function resetGame() {
@@ -698,7 +674,7 @@
 
         ctx.fillStyle = "#5b4a30";
         ctx.beginPath();
-        ctx.ellipse(x + midSegW * 0.35, midY + 10, 10, 4, 0, 0, Math.PI * 2);
+        ctx.ellipse(x + midSegW * 0.35, midY + 10, 10, 4, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.strokeStyle = "rgba(40,30,20,0.9)";
@@ -1030,15 +1006,13 @@
 
       ctx.textAlign = "center";
 
-      // Title
       ctx.font = "28px " + UI_FONT;
       ctx.fillStyle = "#0d47a1";
       ctx.strokeStyle = "rgba(0,0,0,0.4)";
       ctx.lineWidth = 2;
-      ctx.strokeText("WW1 Sky Patrol", W / 2, H * 0.15);
-      ctx.fillText("WW1 Sky Patrol", W / 2, H * 0.15);
+      ctx.strokeText("WW1 Air Patrol", W / 2, H * 0.15);
+      ctx.fillText("WW1 Air Patrol", W / 2, H * 0.15);
 
-      // powered by
       ctx.font = "16px " + UI_FONT;
       ctx.fillStyle = "#4e342e";
       ctx.fillText("powered by", W / 2, H * 0.20);
@@ -1112,11 +1086,11 @@
       ctx.fillText("German Air Service", germanX, iconY + iconSize * 0.75);
       ctx.fillText("Royal Flying Corps", britishX, iconY + iconSize * 0.75);
 
-      // Top Aces leaderboard
+      // Top Aces from local leaderboard (this device)
       ctx.textAlign = "center";
       ctx.fillStyle = "#1a237e";
       ctx.font = "16px " + UI_FONT;
-      ctx.fillText("Top Aces", W / 2, H * 0.78);
+      ctx.fillText("Top Aces (this device)", W / 2, H * 0.78);
 
       ctx.font = "13px " + UI_FONT;
       ctx.fillStyle = "#37474f";
@@ -1130,7 +1104,6 @@
       hintEl.textContent = "Tap a side to enter";
     }
 
-    // ---------- GERMAN PLANE SELECT (uses DR3 thumbnail) ----------
     function drawGermanPlaneList() {
       if (screen !== "planeSelectGerman") return;
 
@@ -1177,7 +1150,6 @@
         const thumbX = rowX + 20;
         const thumbY = y + (rowH - 14) / 2;
 
-        // Decide which image to show
         let imgToUse = null;
         if (entry.planeType === "dr3") {
           if (dr3ThumbLoaded)      imgToUse = dr3ThumbImg;
