@@ -136,15 +136,16 @@
       Tap a side to enter
     </div>
 
+    <!-- Music controls + audio -->
     <button id="muteBtn" class="mute-btn">🔊</button>
-    <!-- Put your MP3 next to index.html and rename the src if needed -->
     <audio id="bgmRun" src="bgm_run.mp3" loop></audio>
   </div>
 
   <!-- Supabase client -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.48.0/dist/umd/supabase.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 
   <script>
+    // === DOM & canvas ===
     const canvas = document.getElementById("game");
     /** @type {CanvasRenderingContext2D} */
     const ctx = canvas.getContext("2d");
@@ -166,11 +167,11 @@
 
     const UI_FONT = "Segoe UI, Tahoma, Geneva, Verdana, sans-serif";
 
-    // === Supabase global leaderboard ===
-    const SUPABASE_URL = "https://jnpzarwuilevjdulgxrc.supabase.co";
-    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpucHphcnd1aWxldmpkdWxneHJjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM0MTk1OTIsImV4cCI6MjA3ODk5NTU5Mn0.agBNLqBMUSE9-MxD4U9Evij8mGSxU5ey_LdFuA3tqZE";
-
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // === Supabase setup ===
+    const { createClient } = supabase;
+    const supabaseUrl = "https://jnpzarwuilevjdulgxrc.supabase.co";
+    const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpucHphcnd1aWxldmpkdWxneHJjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM0MTk1OTIsImV4cCI6MjA3ODk5NTU5Mn0.agBNLqBMUSE9-MxD4U9Evij8mGSxU5ey_LdFuA3tqZE";
+    const sb = createClient(supabaseUrl, supabaseKey);
 
     // Screens: splash, planeSelectGerman, planeSelectBritish, game
     let screen = "splash";
@@ -201,6 +202,7 @@
     dr3Img.onerror = () => console.error("Could not load FokkerDR3.png");
     dr3Img.src = "FokkerDR3.png";
 
+    // Thumbnail for DR3
     const dr3ThumbImg = new Image();
     let dr3ThumbLoaded = false;
     dr3ThumbImg.onload = () => { dr3ThumbLoaded = true; };
@@ -296,13 +298,22 @@
     let obstacles;
     let score = 0;
 
-    // High score & leaderboard (local mirror)
+    // High score & leaderboard
     let bestScore = parseInt(localStorage.getItem("ww1_fokker_best") || "0", 10);
     let bestPilotName = localStorage.getItem("ww1_fokker_best_pilot") || "-";
 
     let leaderboard = [];
 
-    // Audio state
+    // Local fallback save (for offline / caching)
+    function saveLeaderboard() {
+      try {
+        localStorage.setItem("ww1_leaderboard", JSON.stringify(leaderboard));
+      } catch (e) {
+        console.log("Cannot save leaderboard locally:", e);
+      }
+    }
+
+    // === Music state ===
     let bgmStarted = false;
     let bgmMuted = false;
 
@@ -328,64 +339,55 @@
       });
     }
 
-    // Load global leaderboard from Supabase
-    async function loadLeaderboard() {
+    // === Load leaderboard from Supabase (global) ===
+    async function initLeaderboard() {
+      // 1) Local cache
+      const raw = localStorage.getItem("ww1_leaderboard");
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) leaderboard = parsed;
+        } catch {
+          leaderboard = [];
+        }
+      }
+
+      // 2) Remote from Supabase
       try {
-        const { data, error } = await supabaseClient
+        const { data, error } = await sb
           .from("scores")
           .select("name, score")
           .order("score", { ascending: false })
           .limit(10);
 
-        if (error) {
-          console.log("Supabase load error:", error);
-          return;
-        }
-
-        leaderboard = (data || []).map(row => ({
-          name: row.name || "-",
-          score: Number(row.score) || 0
-        }));
-
-        if (leaderboard.length > 0) {
-          bestScore = leaderboard[0].score;
-          bestPilotName = leaderboard[0].name || "-";
-          bestEl.textContent = bestScore;
-          bestPilotEl.textContent = bestPilotName;
-          localStorage.setItem("ww1_fokker_best", String(bestScore));
-          localStorage.setItem("ww1_fokker_best_pilot", bestPilotName);
-        }
-
-        if (screen === "splash") {
-          drawSplash();
+        if (!error && Array.isArray(data)) {
+          leaderboard = data.map(row => ({
+            name: row.name || "Unknown",
+            score: Number(row.score) || 0
+          }));
+          saveLeaderboard();
+        } else if (error) {
+          console.log("Supabase read error:", error.message);
         }
       } catch (err) {
-        console.log("Supabase load failed:", err);
+        console.log("Online leaderboard not available, using local only.", err);
+      }
+
+      if (leaderboard.length > 0) {
+        bestScore = leaderboard[0].score;
+        bestPilotName = leaderboard[0].name || "-";
+      }
+
+      bestEl.textContent = bestScore;
+      bestPilotEl.textContent = bestPilotName;
+
+      if (screen === "splash") {
+        drawSplash();
       }
     }
 
-    // Submit score ONLY at game over
-    async function submitScoreIfNeeded() {
-      if (!currentPilotName || score <= 0) return;
-
-      const name = currentPilotName;
-      const newScore = score;
-
-      try {
-        const { error } = await supabaseClient
-          .from("scores")
-          .insert([{ name, score: newScore }]);
-
-        if (error) {
-          console.log("Supabase insert error:", error);
-          return;
-        }
-        // refresh leaderboard
-        loadLeaderboard();
-      } catch (err) {
-        console.log("Supabase insert failed:", err);
-      }
-    }
+    // call once on load
+    initLeaderboard();
 
     let currentPilotName = "";
     const lastPilot = localStorage.getItem("ww1_last_pilot");
@@ -402,6 +404,7 @@
     let gameOver = false;
     let lastTime = 0;
     let lastSpawnTime = 0;
+    let scoreSubmitted = false; // prevent multiple submits for same run
 
     const parallax = { far: 0, mid: 0, fore: 0 };
 
@@ -436,6 +439,53 @@
       }
     }
 
+    // Update local + global leaderboard once per run
+    async function updateLeaderboardForCurrentPilot() {
+      if (!currentPilotName || score <= 0) return;
+
+      const name = currentPilotName;
+      const newScore = score;
+
+      // 1) Update local leaderboard
+      let entry = leaderboard.find(e => e.name === name);
+      if (entry) {
+        if (newScore > entry.score) {
+          entry.score = newScore;
+        }
+      } else {
+        leaderboard.push({ name, score: newScore });
+      }
+
+      leaderboard.sort((a, b) => b.score - a.score);
+      if (leaderboard.length > 10) {
+        leaderboard.length = 10;
+      }
+
+      saveLeaderboard();
+
+      if (leaderboard.length > 0) {
+        bestScore = leaderboard[0].score;
+        bestPilotName = leaderboard[0].name || "-";
+        bestEl.textContent = bestScore;
+        bestPilotEl.textContent = bestPilotName;
+        localStorage.setItem("ww1_fokker_best", String(bestScore));
+        localStorage.setItem("ww1_fokker_best_pilot", bestPilotName);
+      }
+
+      // 2) Insert into Supabase (one row per run)
+      try {
+        const { error } = await sb
+          .from("scores")
+          .insert({ name, score: newScore });
+
+        if (error) {
+          console.log("Supabase write error:", error.message);
+        }
+      } catch (err) {
+        console.log("Cannot submit score online (ignored):", err);
+      }
+    }
+
     function resetGame() {
       plane = {
         x: PLANE_X,
@@ -449,6 +499,7 @@
       score = 0;
       lives = 3;
       damageLevel = 0;
+      scoreSubmitted = false;
       scoreEl.textContent = score;
       updateLivesDisplay();
       lastTime = 0;
@@ -652,7 +703,6 @@
             localStorage.setItem("ww1_fokker_best_pilot", bestPilotName);
           }
 
-          // NOTE: no DB write here anymore – only on game over
           updateLevelByScore();
           checkUnlocks();
         }
@@ -1154,7 +1204,7 @@
       hintEl.textContent = "Tap a side to enter";
     }
 
-    // ---------- GERMAN PLANE SELECT ----------
+    // ---------- GERMAN PLANE SELECT (uses DR3 thumbnail) ----------
     function drawGermanPlaneList() {
       if (screen !== "planeSelectGerman") return;
 
@@ -1296,9 +1346,15 @@
     }
 
     function endGame() {
-      gameOver = true;
-      gameRunning = false;
-      submitScoreIfNeeded(); // write only final score
+      if (!gameOver) {
+        gameOver = true;
+        gameRunning = false;
+        // submit score once per run
+        if (!scoreSubmitted && score > 0) {
+          scoreSubmitted = true;
+          updateLeaderboardForCurrentPilot();
+        }
+      }
       drawScene();
     }
 
@@ -1339,6 +1395,9 @@
     }
 
     function handleInput(evt) {
+      // start music on first interaction
+      startBgmIfNeeded();
+
       if (screen === "splash") {
         if (evt) {
           const { x, y } = getCanvasCoordinates(evt);
@@ -1365,7 +1424,6 @@
           hintEl.textContent = "Tap or press SPACE to fly ✈️";
           resetGame();
           flap();
-          startBgmIfNeeded();
           startGameLoop();
           return;
         }
@@ -1379,7 +1437,6 @@
           hintEl.textContent = "Tap or press SPACE to fly ✈️";
           resetGame();
           flap();
-          startBgmIfNeeded();
           startGameLoop();
           return;
         }
@@ -1404,7 +1461,6 @@
           hintEl.textContent = "Tap or press SPACE to fly ✈️";
           resetGame();
           flap();
-          startBgmIfNeeded();
           startGameLoop();
           return;
         } else {
@@ -1432,7 +1488,6 @@
 
       if (screen === "game") {
         flap();
-        startBgmIfNeeded();
         startGameLoop();
       }
     }
@@ -1456,7 +1511,6 @@
 
     resetGame();
     drawSplash();
-    loadLeaderboard();
   </script>
 </body>
 </html>
