@@ -1478,11 +1478,19 @@
         return;
       }
 
-      if (gameOver) {
+           if (gameOver) {
         gameOver = false;
         screen = "splash";
         hintEl.textContent = "Tap a side to enter";
         drawSplash();
+
+        // Stop game music when returning to main menu
+        if (bgmRun) {
+          bgmRun.pause();
+          bgmRun.currentTime = 0;  // rewind to start
+          bgmStarted = false;      // allow fresh start next game
+        }
+
         return;
       }
 
